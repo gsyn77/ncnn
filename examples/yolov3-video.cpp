@@ -37,7 +37,8 @@ struct Object {
     float prob;
 };
 
-static int detect_yolov3(const cv::Mat &bgr, vector<Object> &objects, ncnn::Extractor ex, int target_size) {
+static int
+detect_yolov3(const cv::Mat &bgr, vector<Object> &objects, ncnn::Extractor ex, int target_size, int chosen_class_idx) {
     int img_w = bgr.cols;
     int img_h = bgr.rows;
 
@@ -61,6 +62,7 @@ static int detect_yolov3(const cv::Mat &bgr, vector<Object> &objects, ncnn::Extr
 
         Object object;
         object.label = values[0];
+        if (object.label != chosen_class_idx) continue;
         object.prob = values[1];
         object.rect.x = values[2] * img_w;
         object.rect.y = values[3] * img_h;
@@ -73,13 +75,7 @@ static int detect_yolov3(const cv::Mat &bgr, vector<Object> &objects, ncnn::Extr
     return 0;
 }
 
-static void draw_objects(const cv::Mat &bgr, const vector<Object> &objects) {
-    static const char *class_names[] = {"background",
-                                        "aeroplane", "bicycle", "bird", "boat",
-                                        "bottle", "bus", "car", "cat", "chair",
-                                        "cow", "diningtable", "dog", "horse",
-                                        "motorbike", "person", "pottedplant",
-                                        "sheep", "sofa", "train", "tvmonitor"};
+static void draw_objects(const cv::Mat &bgr, const vector<Object> &objects, const char **class_names) {
 
     cv::Mat image = bgr.clone();
 
@@ -89,10 +85,10 @@ static void draw_objects(const cv::Mat &bgr, const vector<Object> &objects) {
 //        fprintf(stderr, "%d = %.5f at %.2f %.2f %.2f x %.2f\n", obj.label, obj.prob,
 //                obj.rect.x, obj.rect.y, obj.rect.width, obj.rect.height);
 
-        cv::rectangle(image, obj.rect, cv::Scalar(255, 0, 0));
+        cv::rectangle(image, obj.rect, cv::Scalar(255, 255, 0));
 
         char text[256];
-//        sprintf(text, "%s %.1f%%", class_names[obj.label], obj.prob * 100);
+        sprintf(text, "%s %.1f%%", class_names[obj.label], obj.prob * 100);
 
         int baseLine = 0;
         cv::Size label_size = cv::getTextSize(text, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseLine);
@@ -106,7 +102,7 @@ static void draw_objects(const cv::Mat &bgr, const vector<Object> &objects) {
 
         cv::rectangle(image, cv::Rect(cv::Point(x, y),
                                       cv::Size(label_size.width, label_size.height + baseLine)),
-                      cv::Scalar(255, 255, 255), -1);
+                      cv::Scalar(255, 200, 200), -1);
 
         cv::putText(image, text, cv::Point(x, y + label_size.height),
                     cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0));
@@ -121,8 +117,11 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Usage: %s [mp4 path]\n", argv[0]);
         return -1;
     }
-
     const char *imagepath = argv[1];
+    char *class_chosen;
+    if (argc == 3) {
+        class_chosen = argv[2];
+    }
 
     cv::VideoCapture cap(imagepath);
     if (!cap.isOpened()) {
@@ -147,8 +146,15 @@ int main(int argc, char **argv) {
     yolov3.load_param("mobilenetv2_yolov3.param");
     yolov3.load_model("mobilenetv2_yolov3.bin");
     ncnn::Extractor ex = yolov3.create_extractor();
-    ex.set_num_threads(4);
+    ex.set_num_threads(2);
     const int target_size = 352;
+
+    static const char *class_names[] = {"background",
+                                        "aeroplane", "bicycle", "bird", "boat",
+                                        "bottle", "bus", "car", "cat", "chair",
+                                        "cow", "diningtable", "dog", "horse",
+                                        "motorbike", "person", "pottedplant",
+                                        "sheep", "sofa", "train", "tvmonitor"};
 
     while (true) {
         cv::Mat frame;
@@ -157,10 +163,13 @@ int main(int argc, char **argv) {
             break;
         }
         int start = clock();
+        cv::Mat resize_frame;
+        cv::resize(frame, resize_frame, cv::Size(target_size, target_size));
+        frame = resize_frame;
         vector<Object> objects;
-        detect_yolov3(frame, objects, ex, target_size);
+        detect_yolov3(frame, objects, ex, target_size, 15); // just choose person
         cout << "inference-time: " << (double) (clock() - start) / CLOCKS_PER_SEC << "seconds" << endl;
-        draw_objects(frame, objects);
+        draw_objects(frame, objects, class_names);
 
         waitKey(1);
     }
